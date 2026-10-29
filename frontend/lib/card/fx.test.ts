@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CARD_FIAT_CURRENCIES,
+  CARD_FX_TTL_SECONDS,
+  computeCardFxQuotes,
+  formatCardFxRate,
   FX_FIXTURE_DATE,
   FX_FIXTURE_RATES,
+  getCardFxQuote,
   getCurrencyDecimals,
   getFixtureRate,
   quote,
@@ -146,6 +151,67 @@ describe('card fx quote', () => {
       for (const entry of FX_FIXTURE_RATES) {
         expect(entry.rate).toBeGreaterThan(0);
       }
+    });
+  });
+
+  // ── Upstream CARD-48 snapshot functions (unchanged by CARD-10) ──────────
+
+  describe('computeCardFxQuotes', () => {
+    it('returns a snapshot with the expected currencies', () => {
+      const snapshot = computeCardFxQuotes(Date.now());
+
+      expect(snapshot.quotes).toHaveLength(CARD_FIAT_CURRENCIES.length);
+      for (const q of snapshot.quotes) {
+        expect(q.indicative).toBe(true);
+        expect(CARD_FIAT_CURRENCIES).toContain(q.fiatCurrency);
+      }
+    });
+
+    it('applies drift across revisions producing different rates', () => {
+      const s0 = computeCardFxQuotes(0, 0);
+      const s1 = computeCardFxQuotes(0, 1);
+
+      const eur0 = s0.quotes.find((q) => q.fiatCurrency === 'EUR');
+      const eur1 = s1.quotes.find((q) => q.fiatCurrency === 'EUR');
+      expect(eur0?.ratePerUsdc).not.toBe(eur1?.ratePerUsdc);
+    });
+
+    it('revision 0 has zero drift (base rates)', () => {
+      const snapshot = computeCardFxQuotes(0, 0);
+      const usd = snapshot.quotes.find((q) => q.fiatCurrency === 'USD');
+      expect(usd?.ratePerUsdc).toBe('1.0000');
+    });
+  });
+
+  describe('formatCardFxRate', () => {
+    it('formats a rate string', () => {
+      const snapshot = computeCardFxQuotes(0, 0);
+      const eur = snapshot.quotes.find((q) => q.fiatCurrency === 'EUR')!;
+
+      expect(formatCardFxRate(eur)).toContain('1 USDC =');
+      expect(formatCardFxRate(eur)).toContain('EUR');
+    });
+  });
+
+  describe('getCardFxQuote', () => {
+    it('retrieves a quote by currency', () => {
+      const snapshot = computeCardFxQuotes(0, 0);
+      const eur = getCardFxQuote(snapshot, 'EUR');
+
+      expect(eur.fiatCurrency).toBe('EUR');
+      expect(eur.indicative).toBe(true);
+    });
+
+    it('throws for a currency not in the snapshot', () => {
+      const snapshot = computeCardFxQuotes(0, 0);
+
+      expect(() => getCardFxQuote(snapshot, 'JPY' as 'EUR')).toThrow();
+    });
+  });
+
+  describe('CARD_FX_TTL_SECONDS', () => {
+    it('is a positive number', () => {
+      expect(CARD_FX_TTL_SECONDS).toBeGreaterThan(0);
     });
   });
 });
